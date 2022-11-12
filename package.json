@@ -1,0 +1,25 @@
+{
+  "name": "trader",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc --build",
+    "dev": "ts-node-dev src/services/balancer.ts",
+    "run": "ts-node src/services/balancer.ts",
+    "cli": "ts-node src/entrypoints/cli"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^18.11.9",
+    "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^4.8.4"
+  },
+  "dependencies": {
+    "playwright": "^1.27.1"
+  }
+}
