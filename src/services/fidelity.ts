@@ -1,14 +1,14 @@
 import playwright, {Browser, Page} from "playwright"
-import {BuyOrder, SellOrder, TradeAction} from "../models/trade";
+import {BuyOrder, SellOrder, TradeAction, TradeOrder} from "../models/trade";
 import {error} from "../utils";
 import Brokerage from "./banks/brokerage";
 
 class Fidelity extends Brokerage {
     private static readonly Endpoints = {
-        "TRADE": "https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry",
-        "LOGIN": "https://digital.fidelity.com/prgw/digital/login/full-page",
-        "PORTFOLIO": "https://oltx.fidelity.com/ftgw/fbc/oftop/portfolio",
-        "SECURITY_CODE": "https://login.fidelity.com/cas/login/RtlCust",
+        TRADE: "https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry",
+        LOGIN: "https://digital.fidelity.com/prgw/digital/login/full-page",
+        PORTFOLIO: "https://oltx.fidelity.com/ftgw/fbc/oftop/portfolio",
+        SECURITY_CODE: "https://login.fidelity.com/cas/login/RtlCust",
     }
 
     private _browser: Browser | undefined
@@ -93,27 +93,64 @@ class Fidelity extends Brokerage {
         }
 
         await page.waitForSelector('text=Extra security step required')
-        console.log('got to 2fa')
-
-        await page.waitForTimeout(5000)
-
         const button = page.locator('button:text("Continue")')
-        // TODO: this doesn't work :(
-        // await page.click('button:text("Continue")')
+        const position = (await button.boundingBox())!
 
-        // TODO: type in correct code and submit
+        // This is gross, see if there's another way
+        const [x, y] = [position.x + position.width / 2, position.y + position.height / 2]
+        await page.mouse.move(x, y, {steps: 100})
+        await page.mouse.down()
+        await page.waitForTimeout(Math.random() * 200 + 200)
+        await page.mouse.up()
+
+        // TODO: get this a different way and type it in
+        console.log('please enter two factor code')
+        await page.waitForTimeout(10000)
+        await page.press('body', 'Enter')
+
+        await page.waitForURL(url => url.origin + url.pathname === Fidelity.Endpoints.PORTFOLIO)
     }
 
     async buy(trade: BuyOrder): Promise<boolean> {
         const page = await this.page()
 
-        await page.goto(Fidelity.Endpoints.TRADE)
+        await page.goto(Fidelity.urlForTrade(trade))
 
-        // TODO: type in Symbol
+        await page.waitForTimeout(5000)
+        await page.click('text="Dollars"')
+        await page.type('#eqt-shared-quantity', trade.amount.toString())
+        await page.click('text="Market"')
+        await page.click('text="Preview order"')
+
+        const preview = page.locator('.eq-ticket__preview__trade-details-selections')
+        const screenshot = preview.screenshot()
+
         return false;
     }
 
     async sell(trade: SellOrder): Promise<boolean> {
         throw new Error('selling at Fidelity is not implemented')
+    }
+
+    private static urlForTrade(trade: TradeOrder<any>): string {
+        const url = new URL(Fidelity.Endpoints.TRADE)
+
+        const params = url.searchParams
+        params.set('ACCOUNT', Fidelity.ACCOUNT)
+        params.set('ORDER_ACTION', Fidelity.orderActionForTrade(trade))
+        params.set('SYMBOL', trade.asset)
+
+        return url.toString()
+    }
+
+    private static orderActionForTrade(trade: TradeOrder<any>): string {
+        switch (trade.action) {
+            case TradeAction.BUY:
+                return 'B'
+            case TradeAction.SELL:
+                return 'S'
+            default:
+                error(`Fidelity does not support trade type ${trade.action.name}`)
+        }
     }
 }
