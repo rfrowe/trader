@@ -9,7 +9,7 @@ export default class PortfolioBalancer {
         this.accountBalance = accountBalance
     }
 
-    rebalance(targetAllocation: AssetAllocation, additionalFunds: number = 0): TradeOrder[] {
+    rebalance(targetAllocation: AssetAllocation, additionalFunds: number = 0): TradeOrder<any>[] {
         if (additionalFunds < 0) {
             throw new Error('rebalance is not supported on withdraws')
         }
@@ -37,6 +37,6 @@ export default class PortfolioBalancer {
                 action,
                 amount: delta,
             }
-        }).filter((trade): trade is TradeOrder => trade !== undefined)
+        }).filter((trade): trade is TradeOrder<any> => trade !== undefined)
     }
 }

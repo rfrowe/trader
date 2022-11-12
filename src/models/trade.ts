@@ -5,8 +5,11 @@ export enum TradeAction {
     SELL = "SELL",
 }
 
-export interface TradeOrder {
+export type BuyOrder = TradeOrder<TradeAction.BUY>
+export type SellOrder = TradeOrder<TradeAction.SELL>
+
+export interface TradeOrder<T extends TradeAction> {
     asset: Asset,
-    action: TradeAction
+    action: T
     amount: number
 }
