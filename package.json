@@ -6,8 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc --build",
-    "dev": "ts-node-dev src/services/balancer.ts",
-    "run": "ts-node src/services/balancer.ts",
+    "dev": "ts-node-dev src/entrypoints/daemon.ts",
+    "run": "ts-node src/entrypoints/daemon.ts",
     "cli": "ts-node src/entrypoints/cli"
   },
   "keywords": [],
