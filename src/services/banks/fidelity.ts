@@ -1,17 +1,22 @@
 import playwright, {Browser, Page} from "playwright"
-import {BuyOrder, SellOrder, TradeAction, TradeOrder} from "../models/trade";
-import {error} from "../utils";
-import Brokerage from "./banks/brokerage";
+import {BuyOrder, SellOrder, TradeAction, TradeOrder} from "../../models/trade";
+import {error} from "../../utils";
+import Brokerage from "./brokerage";
+import SlackBot from "../interfaces/slack";
+import Interface from "../interfaces/interface";
 
-class Fidelity extends Brokerage {
-    private static readonly Endpoints = {
-        TRADE: "https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry",
-        LOGIN: "https://digital.fidelity.com/prgw/digital/login/full-page",
-        PORTFOLIO: "https://oltx.fidelity.com/ftgw/fbc/oftop/portfolio",
-        SECURITY_CODE: "https://login.fidelity.com/cas/login/RtlCust",
-    }
+const Endpoints = {
+    TRADE: "https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry",
+    LOGIN: "https://digital.fidelity.com/prgw/digital/login/full-page",
+    PORTFOLIO: "https://oltx.fidelity.com/ftgw/fbc/oftop/portfolio",
+    SECURITY_CODE: "https://login.fidelity.com/cas/login/RtlCust",
+}
+
+export default class Fidelity extends Brokerage {
+    override readonly name: string = "Fidelity"
 
     private _browser: Browser | undefined
+
     private async browser(): Promise<Browser> {
         if (this._browser === undefined) {
             this._browser = await playwright.firefox.launch({
@@ -25,12 +30,13 @@ class Fidelity extends Brokerage {
     }
 
     private _page: Page | undefined
-    private async page(): Promise<Page> {
+
+    private async page(notifier: Interface): Promise<Page> {
         if (this._page === undefined) {
             const browser = await this.browser()
 
             this._page = await browser.newPage()
-            await Fidelity.login(this._page)
+            await Fidelity.login(this._page, notifier)
         }
 
         return this._page
@@ -52,22 +58,22 @@ class Fidelity extends Brokerage {
         return process.env[Fidelity.ACCOUNT_KEY] || error(`${Fidelity.ACCOUNT_KEY} not specified in environment`)
     }
 
-    private static async login(page: Page) {
-        await page.goto(Fidelity.Endpoints.LOGIN)
+    private static async login(page: Page, notifier: Interface) {
+        await page.goto(Endpoints.LOGIN)
 
-        const usernameBox = await page.getByRole('textbox', { name: 'Username' })
+        const usernameBox = await page.getByRole('textbox', {name: 'Username'})
         await usernameBox.click()
         await usernameBox.fill(Fidelity.USERNAME)
 
-        const passwordBox = await page.getByRole('textbox', { name: 'Password' })
+        const passwordBox = await page.getByRole('textbox', {name: 'Password'})
         await passwordBox.click()
         await passwordBox.fill(Fidelity.PASSWORD)
 
-        await page.getByRole('button', { name: 'Log In' }).click()
+        await page.getByRole('button', {name: 'Log In'}).click()
         await page.waitForURL(url => {
             switch (url.origin + url.pathname) {
-                case Fidelity.Endpoints.PORTFOLIO:
-                case Fidelity.Endpoints.SECURITY_CODE:
+                case Endpoints.PORTFOLIO:
+                case Endpoints.SECURITY_CODE:
                     return true
                 default:
                     return false
@@ -76,18 +82,18 @@ class Fidelity extends Brokerage {
 
         const url = new URL(page.url())
         switch (url.origin + url.pathname) {
-            case Fidelity.Endpoints.PORTFOLIO:
+            case Endpoints.PORTFOLIO:
                 return
-            case Fidelity.Endpoints.SECURITY_CODE:
-                return this.twoFactorCode(page)
+            case Endpoints.SECURITY_CODE:
+                return this.twoFactorCode(page, notifier)
             default:
                 error('Failed to login or reach two factor auth page')
         }
     }
 
-    private static async twoFactorCode(page: Page) {
+    private static async twoFactorCode(page: Page, notifier: Interface) {
         const url = new URL(page.url())
-        if (url.origin + url.pathname != Fidelity.Endpoints.SECURITY_CODE) {
+        if (url.origin + url.pathname != Endpoints.SECURITY_CODE) {
             console.log('Mistakenly entered 2FA routine')
             return
         }
@@ -103,16 +109,19 @@ class Fidelity extends Brokerage {
         await page.waitForTimeout(Math.random() * 200 + 200)
         await page.mouse.up()
 
-        // TODO: get this a different way and type it in
-        console.log('please enter two factor code')
-        await page.waitForTimeout(10000)
+        const code = await notifier.getTwoFactorCode()
+        console.log('typing code', code)
+
+        const box = page.locator('#security-code')
+        await box.click()
+        await box.type(code)
         await page.press('body', 'Enter')
 
-        await page.waitForURL(url => url.origin + url.pathname === Fidelity.Endpoints.PORTFOLIO)
+        await page.waitForURL(url => url.origin + url.pathname === Endpoints.PORTFOLIO)
     }
 
-    async buy(trade: BuyOrder): Promise<boolean> {
-        const page = await this.page()
+    async buy(trade: BuyOrder, notifier: Interface): Promise<boolean> {
+        const page = await this.page(notifier)
 
         await page.goto(Fidelity.urlForTrade(trade))
 
@@ -123,9 +132,17 @@ class Fidelity extends Brokerage {
         await page.click('text="Preview order"')
 
         const preview = page.locator('.eq-ticket__preview__trade-details-selections')
-        const screenshot = preview.screenshot()
+        const screenshot = await preview.screenshot()
 
-        return false;
+        const approved = await notifier.proposeTrade({
+            trade,
+            reason: "rebalance your portfolio",
+            proof: screenshot,
+        })
+
+        console.log(`trade is ${approved ? 'approved' : 'rejected'}`)
+
+        return approved
     }
 
     async sell(trade: SellOrder): Promise<boolean> {
@@ -133,7 +150,7 @@ class Fidelity extends Brokerage {
     }
 
     private static urlForTrade(trade: TradeOrder<any>): string {
-        const url = new URL(Fidelity.Endpoints.TRADE)
+        const url = new URL(Endpoints.TRADE)
 
         const params = url.searchParams
         params.set('ACCOUNT', Fidelity.ACCOUNT)
