@@ -1,10 +1,12 @@
 import {BuyOrder, SellOrder, TradeAction, TradeOrder} from "../../models/trade";
 import Interface from "../interfaces/interface";
+import {Asset} from "../../models/assets";
+import {AccountBalance} from "../../models/balance";
 
 export default abstract class Brokerage {
     abstract name: string
 
-    processTrade(trade: TradeOrder<TradeAction>, notifier: Interface): Promise<boolean> {
+    processTrade(trade: TradeOrder, notifier: Interface): Promise<boolean> {
         switch (trade.action) {
             case TradeAction.BUY:
                 return this.buy(trade as BuyOrder, notifier)
@@ -13,11 +15,24 @@ export default abstract class Brokerage {
         }
     }
 
-    processTrades(notifier: Interface, ...trades: TradeOrder<TradeAction>[]): Promise<boolean>[] {
-        return trades.map(trade => this.processTrade(trade, notifier))
+    async processTrades(notifier: Interface, ...trades: TradeOrder[]): Promise<boolean[]> {
+        let success = true
+        const results = []
+
+        for (const trade of trades) {
+            if (success) {
+                success = await this.processTrade(trade, notifier)
+            }
+
+            results.push(success)
+        }
+
+        return results
     }
 
     abstract buy(trade: BuyOrder, notifier: Interface): Promise<boolean>
 
     abstract sell(trade: SellOrder): Promise<boolean>
+
+    abstract positions(notifier: Interface, ...assets: Asset[]): Promise<AccountBalance>
 }

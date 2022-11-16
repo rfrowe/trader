@@ -33,4 +33,10 @@ export class AssetAllocation extends AssetMapping {
 
         return account
     }
+
+    override only(...assets: Asset[]): AssetAllocation {
+        const mapping = super.only(...assets);
+
+        return new AssetAllocation(mapping)
+    }
 }

@@ -26,4 +26,16 @@ export class AssetMapping extends Map<Asset, number> implements ReadonlyMap<Asse
     get sum(): number {
         return this.map(v => v).reduce((a, b) => a + b, 0)
     }
+
+    only(...assets: Asset[]): AssetMapping {
+        const mapping = new Map<Asset, number>()
+
+        this.forEach((value, asset) => {
+            if (assets.includes(asset)) {
+                mapping.set(asset, value)
+            }
+        })
+
+        return new AssetMapping(mapping)
+    }
 }

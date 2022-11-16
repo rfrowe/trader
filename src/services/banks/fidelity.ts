@@ -1,20 +1,36 @@
 import playwright, {Browser, Page} from "playwright"
-import {BuyOrder, SellOrder, TradeAction, TradeOrder} from "../../models/trade";
+import {BuyOrder, SellOrder, TradeAction} from "../../models/trade";
 import {error} from "../../utils";
 import Brokerage from "./brokerage";
-import SlackBot from "../interfaces/slack";
 import Interface from "../interfaces/interface";
+import { AccountBalance } from "../../models/balance";
+import {Asset} from "../../models/assets";
 
 const Endpoints = {
-    TRADE: "https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry",
-    LOGIN: "https://digital.fidelity.com/prgw/digital/login/full-page",
-    PORTFOLIO: "https://oltx.fidelity.com/ftgw/fbc/oftop/portfolio",
-    SECURITY_CODE: "https://login.fidelity.com/cas/login/RtlCust",
+    TRADE: 'https://digital.fidelity.com/ftgw/digital/trade-equity/index/orderEntry',
+    CUSTOM_TRADE(account: string, action: TradeAction, symbol: Asset) {
+        const url = new URL(Endpoints.TRADE)
+
+        const params = url.searchParams
+        params.set('ACCOUNT', account)
+        params.set('ORDER_ACTION', orderActionByTradeAction[action])
+        params.set('SYMBOL', symbol)
+
+        return url.toString()
+    },
+    LOGIN: 'https://digital.fidelity.com/prgw/digital/login/full-page',
+    PORTFOLIO: 'https://oltx.fidelity.com/ftgw/fbc/oftop/portfolio',
+    POSITIONS: (account: string) => `${Endpoints.PORTFOLIO}#positions/${account}`,
+    SECURITY_CODE: 'https://login.fidelity.com/cas/login/RtlCust',
+}
+
+const orderActionByTradeAction: Record<TradeAction, string> = {
+    [TradeAction.BUY]: 'B',
+    [TradeAction.SELL]: 'S',
 }
 
 export default class Fidelity extends Brokerage {
     override readonly name: string = "Fidelity"
-
     private _browser: Browser | undefined
 
     private async browser(): Promise<Browser> {
@@ -120,10 +136,72 @@ export default class Fidelity extends Brokerage {
         await page.waitForURL(url => url.origin + url.pathname === Endpoints.PORTFOLIO)
     }
 
+    async positions(notifier: Interface, ...assets: Asset[]): Promise<AccountBalance> {
+        const page = await this.page(notifier)
+        await page.goto(Endpoints.POSITIONS(Fidelity.ACCOUNT))
+
+        await page.waitForSelector('#posweb-grid')
+
+        const symbols = await page
+            .locator('.posweb-cell-symbol-name')
+            .allInnerTexts()
+            .then(symbols => {
+                if (symbols.length == 0 || symbols.at(-1) !== 'Account Total') {
+                    error('missing account total symbol')
+                }
+
+                return symbols.slice(0, -1)
+            })
+        const prices = await page
+            .locator('.posweb-cell-current_value')
+            .allInnerTexts()
+            .then(values => {
+                const total = parseCurrency(values.at(-1))
+                if (total === undefined) {
+                    error('missing account total balance')
+                }
+                if (values.length == 0 || values[0] != '') {
+                    error('missing expected spacer')
+                }
+
+                const amounts = values.slice(1, -1).map(parseCurrency)
+                const actual = amounts.reduce((a, b) => (a || 0) + (b || 0))
+                if (actual != total) {
+                    error(`actual total ${total} doesn't match actual total ${actual}`)
+                }
+
+                return amounts
+            })
+        if (prices.length != symbols.length) {
+            error(`have ${symbols.length} symbol(s) but ${prices.length} price(s)`)
+        }
+
+        const positions = new Map<Asset, number>()
+        for (let i = 0; i < prices.length; i++) {
+            const symbol = symbols[i].trim()
+            if (symbol.length === 0) {
+                error('empty symbol')
+            }
+
+            const price = prices[i]
+            if (price === undefined) {
+                error(`price for symbol ${symbol} is undefined`)
+            } else if (isNaN(price)) {
+                error(`price for symbol ${symbol} is NaN`)
+            } else if (price < 0) {
+                error(`price for symbol ${symbol} is negative (${price})`)
+            }
+
+            positions.set(symbol, price)
+        }
+
+        return new AccountBalance(positions)
+    }
+
     async buy(trade: BuyOrder, notifier: Interface): Promise<boolean> {
         const page = await this.page(notifier)
 
-        await page.goto(Fidelity.urlForTrade(trade))
+        await page.goto(Endpoints.CUSTOM_TRADE(Fidelity.ACCOUNT, trade.action, trade.asset))
 
         await page.waitForTimeout(5000)
         await page.click('text="Dollars"')
@@ -148,26 +226,17 @@ export default class Fidelity extends Brokerage {
     async sell(trade: SellOrder): Promise<boolean> {
         throw new Error('selling at Fidelity is not implemented')
     }
+}
 
-    private static urlForTrade(trade: TradeOrder<any>): string {
-        const url = new URL(Endpoints.TRADE)
-
-        const params = url.searchParams
-        params.set('ACCOUNT', Fidelity.ACCOUNT)
-        params.set('ORDER_ACTION', Fidelity.orderActionForTrade(trade))
-        params.set('SYMBOL', trade.asset)
-
-        return url.toString()
+function parseCurrency(string: string | undefined): number | undefined {
+    if (string === undefined || !string.startsWith('$')) {
+        return
     }
 
-    private static orderActionForTrade(trade: TradeOrder<any>): string {
-        switch (trade.action) {
-            case TradeAction.BUY:
-                return 'B'
-            case TradeAction.SELL:
-                return 'S'
-            default:
-                error(`Fidelity does not support trade type ${trade.action.name}`)
-        }
+    const value = parseFloat(string.substring(1).replace(',', ''))
+    if (value < 0 || isNaN(value)) {
+        return
     }
+
+    return value
 }

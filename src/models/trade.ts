@@ -9,7 +9,7 @@ export enum TradeAction {
 export type BuyOrder = TradeOrder<TradeAction.BUY>
 export type SellOrder = TradeOrder<TradeAction.SELL>
 
-export interface TradeOrder<T extends TradeAction> {
+export interface TradeOrder<T extends TradeAction = TradeAction> {
     asset: Asset,
     action: T
     account: string,

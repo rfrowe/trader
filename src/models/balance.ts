@@ -12,4 +12,10 @@ export class AccountBalance extends AssetMapping {
     static from(record: Record<Asset, number>): AccountBalance {
         return new AccountBalance(AssetMapping.from(record))
     }
+
+    override only(...assets: Asset[]): AssetMapping {
+        const mapping = super.only(...assets);
+
+        return new AssetMapping(mapping)
+    }
 }
